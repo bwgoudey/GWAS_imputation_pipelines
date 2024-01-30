@@ -11,9 +11,6 @@ workflow {
     .fromFilePairs("${params.bfile_prefix}.{bed,fam,bim}", size:3)
     .ifEmpty {error "No matching plink files"}
     
-
-    chrs.subscribe { println "value: $it" }
-    plink_data.view()
     chr_bfiles = splitChr(plink_data.combine(chrs))
     computeVariantFreq(chr_bfiles)
 }
@@ -46,17 +43,19 @@ process splitChr {
  */
 process computeVariantFreq {
     module 'PLINK/2.00a3.6'
-    input: 
-    path bfile
-    
-    output: 
-    path "${bfile}_freq", emit: chr_bfiles
+
+    // Accepts the output from chr_bfiles
+    input:
+    path bfiles 
+
+    // Define the outputs of this process
+    output:
+    path "${bfiles[0].baseName}.afreq", emit: variant_freq_result
 
     """
-    plink2 --bfile $bfile  --freq --out ${bfile}_freq
+    plink2 --bfile ${bfiles[0].baseName} --freq --out ${bfiles[0].baseName}
     """
 }
-
 /*
  * Run Will Rayner toolbox for SNP checking
  * This is really a SNP filtering stage
