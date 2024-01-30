@@ -1,34 +1,41 @@
 #!/usr/bin/env nextflow
 
-params.bfile = "./gwas/ADNI_Omni25_AD_PACC"
+params.bfile_prefix = "/data/gpfs/projects/punim1484/ad/adni/gwas/ADNI_Omni25_AD_PACC"
 params.outdir = "tmp"
  
 
 workflow {
-    channel.from
-    chrs= Channel.from( 1..22 )
-    chrs.subscribe { println "value: $it" }
+    chrs= Channel.from( 1..2 )
+
+    plink_data = Channel
+    .fromFilePairs("${params.bfile_prefix}.{bed,fam,bim}", size:3)
+    .ifEmpty {error "No matching plink files"}
     
-    splitChr(params.bfile, chrs)
+
+    chrs.subscribe { println "value: $it" }
+    plink_data.view()
+    chr_bfiles = splitChr(plink_data.combine(chrs))
     computeVariantFreq(chr_bfiles)
 }
+
+
 
 /*
  * Split a fasta file into multiple files
  */
 process splitChr {
- 
+    module 'PLINK/2.00a3.6'
+
     input:
-    path input_bfile
-    val chr
+    tuple val(input_bfile), path(files), val(chr)
  
     output:
-    path "${input_bfile}_chr${chr}", emit: chr_bfiles
+    path "${input_bfile}_chr${chr}.{bed,fam,bim}", emit: chr_bfiles
  
     """
-    echo plink --bfile $input_bfile 
-          --chr $chr 
-          --make-bed
+    plink2 --bfile $input_bfile \
+          --chr $chr \
+          --make-bed \
           --out ${input_bfile}_chr${chr} 
     """
 }
@@ -38,6 +45,7 @@ process splitChr {
  * Output variamt frequencies from a given PLINK file
  */
 process computeVariantFreq {
+    module 'PLINK/2.00a3.6'
     input: 
     path bfile
     
@@ -45,7 +53,7 @@ process computeVariantFreq {
     path "${bfile}_freq", emit: chr_bfiles
 
     """
-    plink --bfile $bfile  --freq --out ${bfile}_freq
+    plink2 --bfile $bfile  --freq --out ${bfile}_freq
     """
 }
 
