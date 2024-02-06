@@ -1,19 +1,38 @@
-!/usr/bin/env nextflow
+#!/usr/bin/env nextflow
 
 params.bfile_prefix = "/data/gpfs/projects/punim1484/ad/adni/gwas/ADNI_Omni25_AD_PACC"
 params.outdir = "tmp"
-params.refpanel=/HRC.r1-1.GRCh37.wgs.mac5.sites.tab
+params.refpanel="/data/gpfs/projects/punim1484/ukb/genomics/project/2024_NF_GwasPipeline/HRC.r1-1.GRCh37.wgs.mac5.sites.tab"
+params.token = file('token_topmed.txt').text.trim()
+params.jobname = "bwgoudey, AD_US"
+params.build = "hg19"
+
 
 workflow {
+
+    println "Token: ${params.token}"
+    println "Job Name: ${params.jobname}"
+    println "Build: ${params.build}"
+    println "Build: ${params.bfile_prefix}"
+
     chrs= Channel.from( 1..2 )
 
     plink_data = Channel
     .fromFilePairs("${params.bfile_prefix}.{bed,fam,bim}", size:3)
-    .ifEmpty {error "No matching plink files"}
-    
+    //.ifEmpty {error "No matching plink files"}
+
+    println
+    plink_data.view()
+    plink_data.view { "Plink data: $it" }
+      
     chr_bfiles = splitChr(plink_data.combine(chrs))
     freq_file = computeVariantFreq(chr_bfiles)
-    runWillRaynorScript(chr_bfiles, freq_file, params.refpanel)
+    snp_fix_results = runWillRaynorScript(chr_bfiles, freq_file, params.refpanel)
+    bfile_update=plinkUpdateSNPs(chr_bfiles,snp_fix_results)
+    vcf_file=bfileToVcf(bfile_update)
+
+    vcf_files = vcf_file.collect()
+    sendToTopMed(params.token, vcf_files, params.jobname, params.build)
 }
 
 
@@ -45,7 +64,7 @@ process splitChr {
  */
 process computeVariantFreq {
     module 'PLINK/1.9b_6.21-x86_64'
-    publishDir "./tmp", mode: 'symlink'
+    //publishDir "./tmp", mode: 'symlink'
     // Accepts the output from chr_bfiles
     input:
     path bfiles 
@@ -69,15 +88,85 @@ process runWillRaynorScript {
       path freq_file
       path ref_panel
     output: 
-      path "${bfiles[0].baseName}-updated.{bed,fam,bim}", emit: update_bfiles
+      path "{Force-Allele1,Strand-Flip,Exclude,ID,LOG,Chromosome,Position}-${bfile[0].baseName}-HRC.txt", emit: snp_fix_results
 
     """
-    perl ~tools/HRC-1000G-check-bim.pl -b $bfile
-                -f $bfile
-                -r $freq_file
-                -r $ref_panel
-                -h 
+    perl /home/bwgoudey/tools/HRC-1000G-check-bim-v4.2.7/HRC-1000G-check-bim.pl -b ${bfile[0].baseName}.bim \
+                -f $freq_file \
+                -r $ref_panel \
+                -h \
                 -t=0.3
- '   """
+    """
 
 }
+
+/*
+ * Run Will Rayner toolbox for SNP checking
+ * This is really a SNP filtering stage
+ * TODO: this could be broken up into multiple steps
+ */
+process plinkUpdateSNPs {
+    module 'PLINK/1.9b_6.21-x86_64'
+    input: 
+      path bfile
+      path snp_fix_results
+      
+    output: 
+      path "${bfile[0].baseName}-updated.{bim,bed,fam}"
+
+    """
+    plink --bfile ${bfile[0].baseName} --exclude Exclude-${bfile[0].baseName}-HRC.txt --make-bed --out TEMP1
+    plink --bfile TEMP1 --update-map Chromosome-${bfile[0].baseName}-HRC.txt --update-chr --make-bed --out TEMP2
+    plink --bfile TEMP2 --update-map Position-${bfile[0].baseName}-HRC.txt --make-bed --out TEMP3
+    plink --bfile TEMP3 --flip Strand-Flip-${bfile[0].baseName}-HRC.txt --make-bed --out TEMP4
+    plink --bfile TEMP4 --reference-allele Force-Allele1-${bfile[0].baseName}-HRC.txt --make-bed --out ${bfile[0].baseName}-updated
+    """
+
+}
+
+/*                                                                                                                                                                                       
+ * Run Will Rayner toolbox for SNP checking                                                                                                                                              
+ * This is really a SNP filtering stage                                                                                                                                                  
+ * TODO: this could be broken up into multiple steps                                                                                                                                     
+ */                                                                                                                                                                                      
+process bfileToVcf {
+    publishDir "./tmp", mode: 'symlink'
+    module 'PLINK/2.00a3.6'
+    input:                                                                                                                                                                               
+      path bfile                                                                                                                                                                         
+                                                                                                                                                                                         
+    output:                                                                                                                                                                              
+      path "${bfile[0].baseName}.vcf", emit: vcf_file
+
+    """
+    plink2 --bfile ${bfile[0].baseName} --recode vcf --out ${bfile[0].baseName}
+    """
+}
+
+
+process sendToTopMed {
+    input: 
+      var token
+      path vcfs
+      var job_name
+      var inital_build
+
+    script:
+      def curlFiles = vcf_files.collect { file -> "-F \"files=@$file\"" }.join(' ')
+    
+    """
+    echo curl https://imputation.biodatacatalyst.nhlbi.nih.gov/api/v2/jobs/submit/imputationserver \
+      -X "POST" \
+      -H "X-Auth-Token: ${token}" \
+      -F "mode=qconly" \
+      -F "job-name=${jobname}" \
+      $curlFiles \
+      -F "refpanel=apps@topmed-r3" \
+      -F "build=${inital_build}" \
+      -F "phasing=eagle" \
+      -F "population=all" \
+      -F "meta=yes"
+    """
+}
+
+
