@@ -7,22 +7,21 @@ params.token = file('token_topmed.txt').text.trim()
 params.jobname = "bwgoudey, AD_US"
 params.build = "hg19"
 
-
 workflow {
 
-    println "Token: ${params.token}"
+    /*println "Token: ${params.token}"
     println "Job Name: ${params.jobname}"
     println "Build: ${params.build}"
     println "Build: ${params.bfile_prefix}"
+    */
 
     chrs= Channel.from( 1..2 )
 
     plink_data = Channel
     .fromFilePairs("${params.bfile_prefix}.{bed,fam,bim}", size:3)
-    //.ifEmpty {error "No matching plink files"}
+    .ifEmpty {error "No matching plink files"}
 
-    println
-    plink_data.view()
+    
     plink_data.view { "Plink data: $it" }
       
     chr_bfiles = splitChr(plink_data.combine(chrs))
@@ -30,9 +29,10 @@ workflow {
     snp_fix_results = runWillRaynorScript(chr_bfiles, freq_file, params.refpanel)
     bfile_update=plinkUpdateSNPs(chr_bfiles,snp_fix_results)
     vcf_file=bfileToVcf(bfile_update)
-
+    /*
     vcf_files = vcf_file.collect()
     sendToTopMed(params.token, vcf_files, params.jobname, params.build)
+    */
 }
 
 
@@ -41,6 +41,7 @@ workflow {
  * Split a fasta file into multiple files
  */
 process splitChr {
+    module 'FlexiBLAS/3.2.0'
     module 'PLINK/2.00a3.6'
     publishDir "./tmp", mode: 'symlink'
 
@@ -130,6 +131,7 @@ process plinkUpdateSNPs {
  * TODO: this could be broken up into multiple steps                                                                                                                                     
  */                                                                                                                                                                                      
 process bfileToVcf {
+    module "FlexiBLAS/3.2.0"
     publishDir "./tmp", mode: 'symlink'
     module 'PLINK/2.00a3.6'
     input:                                                                                                                                                                               
