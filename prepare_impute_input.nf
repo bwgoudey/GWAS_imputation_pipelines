@@ -29,10 +29,11 @@ workflow {
     snp_fix_results = runWillRaynorScript(chr_bfiles, freq_file, params.refpanel)
     bfile_update=plinkUpdateSNPs(chr_bfiles,snp_fix_results)
     vcf_file=bfileToVcf(bfile_update)
-    /*
+    
     vcf_files = vcf_file.collect()
+    
     sendToTopMed(params.token, vcf_files, params.jobname, params.build)
-    */
+    
 }
 
 
@@ -147,17 +148,22 @@ process bfileToVcf {
 
 
 process sendToTopMed {
+    publishDir "./tmp", mode: 'symlink'
     input: 
-      var token
-      path vcfs
-      var job_name
-      var inital_build
+      val token
+      path vcf_files
+      val jobname
+      val inital_build
+      //tuple val(token), path(vcfs), val(job_name), val(inital_build)
+
+    output:
+        path "tmp.txt"
 
     script:
       def curlFiles = vcf_files.collect { file -> "-F \"files=@$file\"" }.join(' ')
     
     """
-    echo curl https://imputation.biodatacatalyst.nhlbi.nih.gov/api/v2/jobs/submit/imputationserver \
+    echo 'curl https://imputation.biodatacatalyst.nhlbi.nih.gov/api/v2/jobs/submit/imputationserver \
       -X "POST" \
       -H "X-Auth-Token: ${token}" \
       -F "mode=qconly" \
@@ -167,7 +173,7 @@ process sendToTopMed {
       -F "build=${inital_build}" \
       -F "phasing=eagle" \
       -F "population=all" \
-      -F "meta=yes"
+      -F "meta=yes"' > tmp.txt
     """
 }
 
