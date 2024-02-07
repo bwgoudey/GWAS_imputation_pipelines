@@ -6,6 +6,7 @@ params.refpanel="/data/gpfs/projects/punim1484/ukb/genomics/project/2024_NF_Gwas
 params.token = file('token_topmed.txt').text.trim()
 params.jobname = "bwgoudey, AD_US"
 params.build = "hg19"
+params.HRC_check_exe = "/home/bwgoudey/tools/HRC-1000G-check-bim-v4.2.13_NoReadKey/HRC-1000G-check-bim-NoReadKey.pl"
 
 workflow {
 
@@ -15,7 +16,7 @@ workflow {
     println "Build: ${params.bfile_prefix}"
     */
 
-    chrs= Channel.from( 1..2 )
+    chrs= Channel.from( 1..22 )
 
     plink_data = Channel
     .fromFilePairs("${params.bfile_prefix}.{bed,fam,bim}", size:3)
@@ -93,7 +94,7 @@ process runWillRaynorScript {
       path "{Force-Allele1,Strand-Flip,Exclude,ID,LOG,Chromosome,Position}-${bfile[0].baseName}-HRC.txt", emit: snp_fix_results
 
     """
-    perl /home/bwgoudey/tools/HRC-1000G-check-bim-v4.2.7/HRC-1000G-check-bim.pl -b ${bfile[0].baseName}.bim \
+    perl ${params.HRC_check_exe} -b ${bfile[0].baseName}.bim \
                 -f $freq_file \
                 -r $ref_panel \
                 -h \
