@@ -24,16 +24,25 @@ workflow {
 
     
     plink_data.view { "Plink data: $it" }
-      
+
+    chr_bfile_tuple = chrs.combine(plink_data)
+    chr_bfile = splitChr(chr_bfile_tuple)
+    freq_file = computeVariantFreq(chr_bfile)
+    
+    snp_fix_results = runWillRaynorScript(chr_bfile.join(freq_file, by: 0), params.refpanel)
+    bfile_update = plinkUpdateSNPs(chr_bfile.join(snp_fix_results, by: 0))
+    vcf_file = bfileToVcf(bfile_update)
+    /*
     chr_bfiles = splitChr(plink_data.combine(chrs))
-    freq_file = computeVariantFreq(chr_bfiles)
+    freq_file = chr_bfiles.splitChrcomputeVariantFreq()
     snp_fix_results = runWillRaynorScript(chr_bfiles, freq_file, params.refpanel)
     bfile_update=plinkUpdateSNPs(chr_bfiles,snp_fix_results)
     vcf_file=bfileToVcf(bfile_update)
+    */
     
-    vcf_files = vcf_file.collect()
-    
+    vcf_files = vcf_file.map { chr, file -> file }.collect()
     sendToTopMed(params.token, vcf_files, params.jobname, params.build)
+    
     
 }
 
@@ -45,19 +54,19 @@ workflow {
 process splitChr {
     module 'FlexiBLAS/3.2.0'
     module 'PLINK/2.00a3.6'
-    publishDir "./tmp", mode: 'symlink'
+    //publishDir "./tmp", mode: 'symlink'
 
     input:
-    tuple val(input_bfile), path(files), val(chr)
+    tuple val(chr), val(bfile_prefix), path(bfiles)
  
     output:
-    path "${input_bfile}_chr${chr}.{bed,fam,bim}", emit: chr_bfiles
+    tuple val(chr), path("${bfile_prefix}_chr${chr}.{bed,fam,bim}")//, emit: chr_bfiles
  
     """
-    plink2 --bfile $input_bfile \
+    plink2 --bfile $bfile_prefix \
           --chr $chr \
           --make-bed \
-          --out ${input_bfile}_chr${chr} 
+          --out ${bfile_prefix}_chr${chr} 
     """
 }
 
@@ -70,11 +79,11 @@ process computeVariantFreq {
     //publishDir "./tmp", mode: 'symlink'
     // Accepts the output from chr_bfiles
     input:
-    path bfiles 
+    tuple val(chr), path(bfiles)
 
     // Define the outputs of this process
     output:
-    path "${bfiles[0].baseName}.frq", emit: variant_freq_result
+    tuple val(chr), path("${bfiles[0].baseName}.frq")// emit: variant_freq_result
 
     """
     plink --bfile ${bfiles[0].baseName} --freq --out ${bfiles[0].baseName}
@@ -87,11 +96,11 @@ process computeVariantFreq {
  */
 process runWillRaynorScript {
     input: 
-      path bfile
-      path freq_file
+      tuple val(chr), path(bfile), path(freq_file)
       path ref_panel
+
     output: 
-      path "{Force-Allele1,Strand-Flip,Exclude,ID,LOG,Chromosome,Position}-${bfile[0].baseName}-HRC.txt", emit: snp_fix_results
+      tuple val(chr), path("{Force-Allele1,Strand-Flip,Exclude,ID,LOG,Chromosome,Position}-${bfile[0].baseName}-HRC.txt")// emit: snp_fix_results
 
     """
     perl ${params.HRC_check_exe} -b ${bfile[0].baseName}.bim \
@@ -111,11 +120,10 @@ process runWillRaynorScript {
 process plinkUpdateSNPs {
     module 'PLINK/1.9b_6.21-x86_64'
     input: 
-      path bfile
-      path snp_fix_results
+      tuple val(chr), path(bfile), path(snp_fix_results)
       
     output: 
-      path "${bfile[0].baseName}-updated.{bim,bed,fam}"
+      tuple val(chr), path("${bfile[0].baseName}-updated.{bim,bed,fam}")
 
     """
     plink --bfile ${bfile[0].baseName} --exclude Exclude-${bfile[0].baseName}-HRC.txt --make-bed --out TEMP1
@@ -136,11 +144,11 @@ process bfileToVcf {
     module "FlexiBLAS/3.2.0"
     publishDir "./tmp", mode: 'symlink'
     module 'PLINK/2.00a3.6'
-    input:                                                                                                                                                                               
-      path bfile                                                                                                                                                                         
-                                                                                                                                                                                         
+    input:
+      tuple val(chr), path(bfile)
+
     output:                                                                                                                                                                              
-      path "${bfile[0].baseName}.vcf", emit: vcf_file
+      tuple val(chr), path("${bfile[0].baseName}.vcf")// emit: vcf_file
 
     """
     plink2 --bfile ${bfile[0].baseName} --recode vcf --out ${bfile[0].baseName}
