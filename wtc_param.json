@@ -1,0 +1,9 @@
+{
+    "bfile_prefix": "/data/gpfs/projects/punim1484/wtc/ben_processed/bdWTC",
+    "outdir": "tmp_wtc",
+    "refpanel": "/data/gpfs/projects/punim1484/ukb/genomics/project/2024_NF_GwasPipeline/HRC.r1-1.GRCh37.wgs.mac5.sites.tab",
+    "token_file": "token_topmed.txt",
+    "jobname": "bwgoudey, AD_US",
+    "build": "hg19",
+    "HRC_check_exe": "/home/bwgoudey/tools/HRC-1000G-check-bim-v4.2.13_NoReadKey/HRC-1000G-check-bim-NoReadKey.pl"
+}

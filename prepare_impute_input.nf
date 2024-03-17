@@ -3,10 +3,12 @@
 params.bfile_prefix = "/data/gpfs/projects/punim1484/ad/adni/gwas/ADNI_Omni25_AD_PACC"
 params.outdir = "tmp"
 params.refpanel="/data/gpfs/projects/punim1484/ukb/genomics/project/2024_NF_GwasPipeline/HRC.r1-1.GRCh37.wgs.mac5.sites.tab"
-params.token = file('token_topmed.txt').text.trim()
-params.jobname = "bwgoudey, AD_US"
+params.token_file = 'token_topmed.txt'
+params.token = file(params.token_file).text.trim()
+params.jobname = "bwgoudey, WTCCC_US"
 params.build = "hg19"
 params.HRC_check_exe = "/home/bwgoudey/tools/HRC-1000G-check-bim-v4.2.13_NoReadKey/HRC-1000G-check-bim-NoReadKey.pl"
+params.publish_dir = "./tmp"
 
 workflow {
 
@@ -40,8 +42,8 @@ workflow {
     vcf_file=bfileToVcf(bfile_update)
     */
     
-    vcf_files = vcf_file.map { chr, file -> file }.collect()
-    sendToTopMed(params.token, vcf_files, params.jobname, params.build)
+    //vcf_files = vcf_file.map { chr, file -> file }.collect()
+    sendToTopMed(params.token, vcf_file, params.jobname, params.build)
     
     
 }
@@ -54,7 +56,7 @@ workflow {
 process splitChr {
     module 'FlexiBLAS/3.2.0'
     module 'PLINK/2.00a3.6'
-    //publishDir "./tmp", mode: 'symlink'
+    //publishDir params.publish_dir, mode: 'symlink'
 
     input:
     tuple val(chr), val(bfile_prefix), path(bfiles)
@@ -76,7 +78,7 @@ process splitChr {
  */
 process computeVariantFreq {
     module 'PLINK/1.9b_6.21-x86_64'
-    //publishDir "./tmp", mode: 'symlink'
+    //publishDir params.publish_dir, mode: 'symlink'
     // Accepts the output from chr_bfiles
     input:
     tuple val(chr), path(bfiles)
@@ -142,47 +144,56 @@ process plinkUpdateSNPs {
  */                                                                                                                                                                                      
 process bfileToVcf {
     module "FlexiBLAS/3.2.0"
-    publishDir "./tmp", mode: 'symlink'
+    publishDir params.publish_dir, mode: 'symlink'
     module 'PLINK/2.00a3.6'
+    module 'OpenSSL/1.1'
+    module 'bzip2/1.0.8'
+    module 'BCFtools/1.15.1'
+    
     input:
       tuple val(chr), path(bfile)
 
     output:                                                                                                                                                                              
-      tuple val(chr), path("${bfile[0].baseName}.vcf")// emit: vcf_file
+      tuple val(chr), path("${bfile[0].baseName}.vcf.gz")// emit: vcf_file
 
     """
-    plink2 --bfile ${bfile[0].baseName} --recode vcf --out ${bfile[0].baseName}
+    plink2 --bfile ${bfile[0].baseName} \
+           --recode vcf \
+           --out ${bfile[0].baseName}
+
+    bcftools sort ${bfile[0].baseName}.vcf \
+        -Oz -o ${bfile[0].baseName}.vcf.gz
     """
 }
 
 
 process sendToTopMed {
-    publishDir "./tmp", mode: 'symlink'
+    publishDir params.publish_dir, mode: 'symlink'
     input: 
       val token
-      path vcf_files
+      tuple val(chr), path(vcf_file)
       val jobname
       val inital_build
       //tuple val(token), path(vcfs), val(job_name), val(inital_build)
 
     output:
-        path "tmp.txt"
+        path "tmp_${chr}.txt"
 
-    script:
-      def curlFiles = vcf_files.collect { file -> "-F \"files=@$file\"" }.join(' ')
+    //script:
+    //  def curlFiles = vcf_files.collect { file -> "-F \"files=@$file\"" }.join(' ')
     
     """
     echo 'curl https://imputation.biodatacatalyst.nhlbi.nih.gov/api/v2/jobs/submit/imputationserver \
       -X "POST" \
       -H "X-Auth-Token: ${token}" \
       -F "mode=qconly" \
-      -F "job-name=${jobname}" \
-      $curlFiles \
+      -F "job-name=${jobname}-${chr}" \
+      -F "files=@${vcf_file}" \
       -F "refpanel=apps@topmed-r3" \
       -F "build=${inital_build}" \
       -F "phasing=eagle" \
       -F "population=all" \
-      -F "meta=yes"' > tmp.txt
+      -F "meta=yes"' > tmp_${chr}.txt
     """
 }
 
