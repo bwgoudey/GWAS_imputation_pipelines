@@ -24,7 +24,6 @@ workflow {
     .fromFilePairs("${params.bfile_prefix}.{bed,fam,bim}", size:3)
     .ifEmpty {error "No matching plink files"}
 
-    
     plink_data.view { "Plink data: $it" }
 
     chr_bfile_tuple = chrs.combine(plink_data)
@@ -33,16 +32,9 @@ workflow {
     
     snp_fix_results = runWillRaynorScript(chr_bfile.join(freq_file, by: 0), params.refpanel)
     bfile_update = plinkUpdateSNPs(chr_bfile.join(snp_fix_results, by: 0))
+
     vcf_file = bfileToVcf(bfile_update)
-    /*
-    chr_bfiles = splitChr(plink_data.combine(chrs))
-    freq_file = chr_bfiles.splitChrcomputeVariantFreq()
-    snp_fix_results = runWillRaynorScript(chr_bfiles, freq_file, params.refpanel)
-    bfile_update=plinkUpdateSNPs(chr_bfiles,snp_fix_results)
-    vcf_file=bfileToVcf(bfile_update)
-    */
-    
-    //vcf_files = vcf_file.map { chr, file -> file }.collect()
+    vcf_files = vcf_file.map { chr, file -> file }.collect()
     sendToTopMed(params.token, vcf_file, params.jobname, params.build)
     
     
@@ -56,7 +48,7 @@ workflow {
 process splitChr {
     module 'FlexiBLAS/3.2.0'
     module 'PLINK/2.00a3.6'
-    //publishDir params.publish_dir, mode: 'symlink'
+    publishDir params.publish_dir, mode: 'symlink'
 
     input:
     tuple val(chr), val(bfile_prefix), path(bfiles)
@@ -78,7 +70,7 @@ process splitChr {
  */
 process computeVariantFreq {
     module 'PLINK/1.9b_6.21-x86_64'
-    //publishDir params.publish_dir, mode: 'symlink'
+    publishDir params.publish_dir, mode: 'symlink'
     // Accepts the output from chr_bfiles
     input:
     tuple val(chr), path(bfiles)
@@ -125,7 +117,7 @@ process plinkUpdateSNPs {
       tuple val(chr), path(bfile), path(snp_fix_results)
       
     output: 
-      tuple val(chr), path("${bfile[0].baseName}-updated.{bim,bed,fam}")
+      tuple val(chr), path("${bfile[0].baseName}-updated.{bim,bed,fam}"), path("Force-Allele1-${bfile[0].baseName}-HRC.txt")
 
     """
     plink --bfile ${bfile[0].baseName} --exclude Exclude-${bfile[0].baseName}-HRC.txt --make-bed --out TEMP1
@@ -145,21 +137,24 @@ process plinkUpdateSNPs {
 process bfileToVcf {
     module "FlexiBLAS/3.2.0"
     publishDir params.publish_dir, mode: 'symlink'
-    module 'PLINK/2.00a3.6'
+    //module 'PLINK/2.00a3.6'
+    module 'PLINK/1.9b_6.21-x86_64'
     module 'OpenSSL/1.1'
     module 'bzip2/1.0.8'
     module 'BCFtools/1.15.1'
     
     input:
-      tuple val(chr), path(bfile)
+      tuple val(chr), path(bfile), path(force_allele_file)
 
     output:                                                                                                                                                                              
       tuple val(chr), path("${bfile[0].baseName}.vcf.gz")// emit: vcf_file
 
     """
-    plink2 --bfile ${bfile[0].baseName} \
+    echo $force_allele_file
+    plink --bfile ${bfile[0].baseName} \
            --recode vcf \
-           --out ${bfile[0].baseName}
+           --out ${bfile[0].baseName} \
+            --a2-allele ${force_allele_file}
 
     bcftools sort ${bfile[0].baseName}.vcf \
         -Oz -o ${bfile[0].baseName}.vcf.gz
