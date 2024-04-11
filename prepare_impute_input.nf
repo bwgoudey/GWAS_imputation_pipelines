@@ -1,6 +1,7 @@
 #!/usr/bin/env nextflow
 
-params.bfile_prefix = "/data/gpfs/projects/punim1484/ad/adni/gwas/ADNI_Omni25_AD_PACC"
+//params.bfile_prefix = "/data/gpfs/projects/punim1484/ad/adni/gwas/ADNI_Omni25_AD_PACC"
+params.bfile_prefixes = "/path/to/set1,/path/to/set2" // Example
 params.outdir = "tmp"
 params.refpanel="/data/gpfs/projects/punim1484/ukb/genomics/project/2024_NF_GwasPipeline/HRC.r1-1.GRCh37.wgs.mac5.sites.tab"
 params.token_file = 'token_topmed.txt'
@@ -9,6 +10,10 @@ params.jobname = "bwgoudey, WTCCC_US"
 params.build = "hg19"
 params.HRC_check_exe = "/home/bwgoudey/tools/HRC-1000G-check-bim-v4.2.13_NoReadKey/HRC-1000G-check-bim-NoReadKey.pl"
 params.publish_dir = "./tmp"
+params.chrStart = 1  // Default start chromosome
+params.chrEnd = 22   // Default end chromosome
+params.vcf_mode = "single" // "single" or "multiple", default is "single"
+
 
 workflow {
 
@@ -18,16 +23,26 @@ workflow {
     println "Build: ${params.bfile_prefix}"
     */
 
-    chrs= Channel.from( 1..22 )
+    chrs = Channel.from(params.chrStart..params.chrEnd)
 
-    plink_data = Channel
-    .fromFilePairs("${params.bfile_prefix}.{bed,fam,bim}", size:3)
-    .ifEmpty {error "No matching plink files"}
+    plink_data_sets = Channel
+    .from(params.bfile_prefixes.split(','))
+    .flatMap{ base ->
+        Channel.fromFilePairs("${base}.{bed,fam,bim}", size:3)
+    }
+    .ifEmpty { error "No matching PLINK files" }
 
-    plink_data.view { "Plink data: $it" }
 
-    chr_bfile_tuple = chrs.combine(plink_data)
-    chr_bfile = splitChr(chr_bfile_tuple)
+    plink_data_sets.view { "Plink data: $it" }
+
+    chr_bfile_tuple = chrs.combine(plink_data_sets)
+    
+    //If using all chromsomes in a given file
+    if(params.chrStart == 0 && params.chrEnd == 0) {
+        chr_bfile = chr_bfile_tuple
+    } else {
+        chr_bfile = splitChr(chr_bfile_tuple)
+    }
     freq_file = computeVariantFreq(chr_bfile)
     
     snp_fix_results = runWillRaynorScript(chr_bfile.join(freq_file, by: 0), params.refpanel)
@@ -35,7 +50,11 @@ workflow {
 
     vcf_file = bfileToVcf(bfile_update)
     vcf_files = vcf_file.map { chr, file -> file }.collect()
-    sendToTopMed(params.token, vcf_file, params.jobname, params.build)
+    if (params.vcf_mode == "single") {
+        sendToTopMed(params.token, vcf_file, params.jobname, params.build, params.vcf_mode)
+    } else if (params.vcf_mode == "multiple") {
+        sendToTopMed(params.token, vcf_files, params.jobname, params.build, params.vcf_mode)
+    }
     
     
 }
@@ -169,14 +188,16 @@ process sendToTopMed {
       tuple val(chr), path(vcf_file)
       val jobname
       val inital_build
+      val vcf_mode
       //tuple val(token), path(vcfs), val(job_name), val(inital_build)
 
     output:
         path "tmp_${chr}.txt"
 
-    //script:
-    //  def curlFiles = vcf_files.collect { file -> "-F \"files=@$file\"" }.join(' ')
+    script:
+      def curlFiles = vcf_files.collect { file -> "-F \"files=@$file\"" }.join(' ')
     
+    if(vcf_mode == "single") {
     """
     echo 'curl https://imputation.biodatacatalyst.nhlbi.nih.gov/api/v2/jobs/submit/imputationserver \
       -X "POST" \
@@ -190,6 +211,21 @@ process sendToTopMed {
       -F "population=all" \
       -F "meta=yes"' > tmp_${chr}.txt
     """
+    } else {
+        """                                                                         
+    echo 'curl https://imputation.biodatacatalyst.nhlbi.nih.gov/api/v2/jobs/submit/imputationserver \
+      -X "POST" \                                                               
+      -H "X-Auth-Token: ${token}" \                                             
+      -F "mode=qconly" \                                                        
+      -F "job-name=${jobname}-${chr}" \                                         
+      $curlFiles \
+      -F "refpanel=apps@topmed-r3" \                                            
+      -F "build=${inital_build}" \                                              
+      -F "phasing=eagle" \                                                      
+      -F "population=all" \                                                     
+      -F "meta=yes"' > tmp_${chr}.txt 
+    """
+    }
 }
 
 
