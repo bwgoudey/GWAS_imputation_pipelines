@@ -1,8 +1,8 @@
 {
     "bfile_prefixes": "/data/gpfs/projects/punim1484/bwgoudey/datasets/cel_WTCCC/3qc/UK*",
-    "chrStart":  6, 
-    "chrEnd":  6,   
-    "vcf_mode": "single",
+    "chrStart":  1, 
+    "chrEnd":  22,   
+    "vcf_mode": "multiple",
     "outdir": "tmp_wtc",
     "refpanel": "/data/gpfs/projects/punim1484/ukb/genomics/project/2024_NF_GwasPipeline/HRC.r1-1.GRCh37.wgs.mac5.sites.tab",
     "token_file": "token_topmed.txt",

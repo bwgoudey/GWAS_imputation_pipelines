@@ -49,10 +49,11 @@ workflow {
     */
     
     bfile_update = plinkUpdateSNPs(chr_bfile.join(snp_fix_results, by: [0,1], failOnMismatch: true, failOnDuplicate: true))
-
-    vcf_file = bfileToVcf(bfile_update)
-    vcf_files = vcf_file.map { chr, file -> file }.collect()
-    println "Build: ${params.build}"          
+    chr_clean = removeRemappedChr(bfile_update)
+    vcf_file = bfileToVcf(chr_clean)
+    vcf_files = vcf_file.map { chr, file -> tuple(-1,file) }.groupTuple(by: 0)//vcf_file.map { chr, file -> file }.collect()
+    //println "Build: ${params.build}"          
+    //println "Mode: ${params.vcf_mode}"          
     if (params.vcf_mode == "single") {
         sendToTopMed(params.token, vcf_file, params.jobname, params.build, params.vcf_mode)
     } else if (params.vcf_mode == "multiple") {
@@ -71,7 +72,7 @@ workflow {
 process splitChr {
     module 'FlexiBLAS/3.2.0'
     module 'PLINK/2.00a3.6'
-    publishDir params.publish_dir, mode: 'symlink'
+    //publishDir params.publish_dir, mode: 'symlink'
 
     input:
     tuple val(chr), val(bfile_prefix), path(bfiles)
@@ -94,7 +95,7 @@ process splitChr {
  */
 process computeVariantFreq {
     module 'PLINK/1.9b_6.21-x86_64'
-    publishDir params.publish_dir, mode: 'symlink'
+    //publishDir params.publish_dir, mode: 'symlink'
     // Accepts the output from chr_bfiles
     input:
     tuple val(chr), val(bfile_prefix), path(bfiles)
@@ -225,7 +226,7 @@ process sendToTopMed {
         jobName_full= "${jobName_full}_${vcf_files.baseName}"
     } else if (vcf_mode == "multiple") {
         curlFiles = vcf_files.collect { file -> "-F \"files=@$file\"" }.join(' ')
-        jobName_full= "${jobName_full}_${vcf_files[0].baseName}"
+        jobName_full= "${jobName_full}_all_chr"
     }
 
     """
@@ -240,5 +241,25 @@ process sendToTopMed {
     -F "phasing=eagle" \\
     -F "population=all" \\
     -F "meta=yes"' > ${jobName_full}.txt
+    """
+}
+
+
+
+/*
+ * Output variamt frequencies from a given PLINK file
+ */
+process removeRemappedChr {
+    module 'PLINK/1.9b_6.21-x86_64'
+    // Accepts the output from chr_bfiles
+    input:
+    tuple val(chr), path(bfiles), path(force_allele_file)
+
+    // Define the outputs of this process
+    output:
+    tuple val(chr), path("${bfiles[0].baseName}_filt.{bed,fam,bim}"), path(force_allele_file)
+
+    """
+    plink --bfile ${bfiles[0].baseName} --chr ${chr} --out ${bfiles[0].baseName}_filt --make-bed
     """
 }
