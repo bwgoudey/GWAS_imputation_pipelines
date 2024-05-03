@@ -13,7 +13,7 @@ params.publish_dir = "./tmp"
 params.chrStart = 1  // Default start chromosome
 params.chrEnd = 22   // Default end chromosome
 params.vcf_mode = "single" // "single" or "multiple", default is "single"
-
+params.password = "alongpassword" 
 
 workflow {
 
@@ -233,8 +233,9 @@ process sendToTopMed {
     echo 'curl https://imputation.biodatacatalyst.nhlbi.nih.gov/api/v2/jobs/submit/imputationserver \
     -X "POST" \\
     -H "X-Auth-Token: ${token}" \\
-    -F "mode=qconly" \\
+    -F "mode=imputation" \\
     -F "job-name=${jobName_full}" \\
+    -F "password=${params.password}" \\
     $curlFiles \\
     -F "refpanel=apps@topmed-r3" \\
     -F "build=${initial_build}" \\
